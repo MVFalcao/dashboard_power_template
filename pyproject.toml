@@ -16,11 +16,12 @@ dependencies = [
   "pandas>=2.2",
   "Jinja2>=3.1",
   "matplotlib>=3.8",
-  "playwright>=1.45",
+  "xhtml2pdf>=0.2.15",
 ]
 
 [project.optional-dependencies]
 turso = ["libsql-client>=0.3.1"]
+pdf-playwright = ["playwright>=1.45"]
 dev = [
   "pytest>=8.0",
   "pytest-cov>=5.0",

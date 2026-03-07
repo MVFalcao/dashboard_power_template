@@ -1,0 +1,309 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Guia Interativo - dashboard-reporter</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #121933;
+      --panel-2: #1a2344;
+      --text: #e6ebff;
+      --muted: #9ca9d4;
+      --accent: #63e6be;
+      --line: #2b3766;
+      --warn: #ffd166;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: radial-gradient(circle at top right, #1a254f 0, var(--bg) 60%);
+      color: var(--text);
+      line-height: 1.45;
+    }
+
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px 16px 40px;
+    }
+
+    h1, h2, h3 { margin-top: 0; }
+
+    p { color: var(--muted); }
+
+    .card {
+      background: linear-gradient(180deg, var(--panel), var(--panel-2));
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+
+    .tab-btn {
+      border: 1px solid var(--line);
+      background: #101838;
+      color: var(--text);
+      border-radius: 10px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .tab-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .tab {
+      display: none;
+      margin-top: 10px;
+    }
+
+    .tab.active { display: block; }
+
+    details {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-top: 10px;
+      background: #0f1735;
+    }
+
+    details summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .cmd {
+      position: relative;
+      margin-top: 8px;
+    }
+
+    pre {
+      margin: 0;
+      background: #060a19;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      overflow: auto;
+      color: #d7e0ff;
+    }
+
+    code { font-family: Consolas, "Courier New", monospace; }
+
+    .copy {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      border: 1px solid var(--line);
+      background: #16214a;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .badge {
+      display: inline-block;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+      color: var(--warn);
+      margin-left: 6px;
+    }
+
+    ul { margin: 8px 0 0 20px; color: var(--muted); }
+
+    .ok { color: var(--accent); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Guia Interativo - dashboard-reporter</h1>
+    <p>Guia em portugues para quem esta comecando. Mostra desde abrir o terminal ate gerar o relatorio final.</p>
+
+    <section class="card">
+      <h2>Escolha Seu Modo</h2>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="exe">Modo .exe (mais facil)</button>
+        <button class="tab-btn" data-tab="python">Modo Python (desenvolvimento)</button>
+      </div>
+
+      <div id="exe" class="tab active">
+        <p>Use este modo no Windows com executavel pronto.</p>
+        <p><strong>Passo a passo:</strong></p>
+        <ul>
+          <li>Abra o PowerShell.</li>
+          <li>Entre na pasta do projeto com <code>cd</code>.</li>
+          <li>Execute o comando abaixo.</li>
+        </ul>
+        <div class="cmd">
+          <button class="copy" data-copy-target="exe0">Copiar</button>
+          <pre><code id="exe0">cd "C:\Users\falca\OneDrive\Documentos\GitHub\dashboard_power_template"</code></pre>
+        </div>
+        <div class="cmd">
+          <button class="copy" data-copy-target="exe1">Copiar</button>
+          <pre><code id="exe1">.\dist\dashboard-reporter.exe quick-run --input template\Dashboard_50.xlsx</code></pre>
+        </div>
+      </div>
+
+      <div id="python" class="tab">
+        <p>Use este modo quando estiver trabalhando no codigo fonte.</p>
+        <p><strong>Passo a passo:</strong></p>
+        <ul>
+          <li>Abra o PowerShell.</li>
+          <li>Entre na pasta do projeto com <code>cd</code>.</li>
+          <li>Execute o comando Python abaixo.</li>
+        </ul>
+        <div class="cmd">
+          <button class="copy" data-copy-target="py0">Copiar</button>
+          <pre><code id="py0">cd "C:\Users\falca\OneDrive\Documentos\GitHub\dashboard_power_template"</code></pre>
+        </div>
+        <div class="cmd">
+          <button class="copy" data-copy-target="py1">Copiar</button>
+          <pre><code id="py1">python -m dashboard_reporter.cli quick-run --input template/Dashboard_50.xlsx</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Passo a Passo Para Iniciantes</h2>
+
+      <details open>
+        <summary>0) Abrir o PowerShell</summary>
+        <p>No Windows: pressione a tecla <code>Win</code>, digite <code>PowerShell</code> e abra o aplicativo.</p>
+      </details>
+
+      <details open>
+        <summary>1) Entrar na pasta do projeto</summary>
+        <p>Copie e execute:</p>
+        <div class="cmd">
+          <button class="copy" data-copy-target="cd1">Copiar</button>
+          <pre><code id="cd1">cd "C:\Users\falca\OneDrive\Documentos\GitHub\dashboard_power_template"</code></pre>
+        </div>
+
+        <p>Agora confirme se esta na pasta certa:</p>
+        <div class="cmd">
+          <button class="copy" data-copy-target="cd2">Copiar</button>
+          <pre><code id="cd2">dir</code></pre>
+        </div>
+
+        <p>Voce deve ver pastas como <code>src</code>, <code>configs</code>, <code>scripts</code>, <code>template</code>.</p>
+      </details>
+
+      <details>
+        <summary>2) Gerar o .exe (somente na primeira vez)</summary>
+        <div class="cmd">
+          <button class="copy" data-copy-target="build1">Copiar</button>
+          <pre><code id="build1">.\scripts\build_windows_exe.ps1</code></pre>
+        </div>
+        <p>Quando terminar, o executavel fica em <code>.\dist\dashboard-reporter.exe</code>.</p>
+      </details>
+
+      <details>
+        <summary>3) Rodar com 1 comando (mais simples)</summary>
+        <div class="cmd">
+          <button class="copy" data-copy-target="run2">Copiar</button>
+          <pre><code id="run2">.\dist\dashboard-reporter.exe quick-run --input template\Dashboard_50.xlsx</code></pre>
+        </div>
+      </details>
+
+      <details>
+        <summary>4) Opcional: configurar banco Turso</summary>
+        <p>Se nao configurar, o sistema cria banco local automaticamente em <code>artifacts/quick-run/quick-run.db</code>.</p>
+        <p>Para usar Turso remoto, crie um arquivo <code>.env</code> com:</p>
+        <div class="cmd">
+          <button class="copy" data-copy-target="env1">Copiar</button>
+          <pre><code id="env1">TURSO_DATABASE_URL=libsql://SEU-BANCO.turso.io
+TURSO_AUTH_TOKEN=SEU_TOKEN</code></pre>
+        </div>
+      </details>
+
+      <details>
+        <summary>5) Opcional: escolher motor de PDF</summary>
+        <p>Padrao: <code>auto</code> (tenta <code>xhtml2pdf</code>, depois Playwright).</p>
+        <div class="cmd">
+          <button class="copy" data-copy-target="pdf1">Copiar</button>
+          <pre><code id="pdf1">set DASHBOARD_REPORTER_PDF_ENGINE=xhtml2pdf
+.\dist\dashboard-reporter.exe quick-run --input template\Dashboard_50.xlsx</code></pre>
+        </div>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>Comando Rapido de Verificacao</h2>
+      <p>Para verificar se deu certo, rode:</p>
+      <div class="cmd">
+        <button class="copy" data-copy-target="check1">Copiar</button>
+        <pre><code id="check1">dir artifacts\quick-run</code></pre>
+      </div>
+      <p>Os arquivos esperados sao:</p>
+      <ul>
+        <li><code>report.html</code></li>
+        <li><code>report.pdf</code></li>
+        <li><code>metrics.json</code></li>
+        <li><code>ingestion_log.json</code></li>
+      </ul>
+      <p class="ok">Se esses 4 artefatos existem, a execucao esta correta.</p>
+    </section>
+
+    <section class="card">
+      <h2>Modo Avancado</h2>
+      <p>Quando quiser controlar cada etapa manualmente:</p>
+      <div class="cmd">
+        <button class="copy" data-copy-target="adv1">Copiar</button>
+        <pre><code id="adv1">dashboard-reporter validate-config --config configs/dashboard_template.yaml
+dashboard-reporter migrate-schema --config configs/dashboard_template.yaml --drop-normalized-candidates
+dashboard-reporter run --input template/Dashboard_50.xlsx --config configs/dashboard_template.yaml --out artifacts/run --run-date 2026-03-07</code></pre>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const tabButtons = document.querySelectorAll(".tab-btn");
+    const tabs = document.querySelectorAll(".tab");
+
+    tabButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-tab");
+        tabButtons.forEach((b) => b.classList.remove("active"));
+        tabs.forEach((tab) => tab.classList.remove("active"));
+        btn.classList.add("active");
+        document.getElementById(id).classList.add("active");
+      });
+    });
+
+    document.querySelectorAll(".copy").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const targetId = btn.getAttribute("data-copy-target");
+        const text = document.getElementById(targetId).innerText;
+        try {
+          await navigator.clipboard.writeText(text);
+          const original = btn.innerText;
+          btn.innerText = "Copiado";
+          setTimeout(() => {
+            btn.innerText = original;
+          }, 1200);
+        } catch (_) {
+          btn.innerText = "Falhou";
+        }
+      });
+    });
+  </script>
+</body>
+</html>

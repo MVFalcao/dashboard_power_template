@@ -140,7 +140,7 @@ def test_cli_run_loads_turso_url_from_dotenv(
     assert db_path.exists()
 
 
-def test_cli_run_fails_without_playwright(
+def test_cli_run_fails_when_forced_playwright_is_missing(
     sample_workbook: Path,
     config_path: Path,
     tmp_path: Path,
@@ -151,6 +151,7 @@ def test_cli_run_fails_without_playwright(
     db_path = tmp_path / "run.db"
 
     monkeypatch.setenv("TURSO_DATABASE_URL", f"file:{db_path}")
+    monkeypatch.setenv("DASHBOARD_REPORTER_PDF_ENGINE", "playwright")
     monkeypatch.setattr(
         "dashboard_reporter.reporting._get_sync_playwright",
         lambda: (_ for _ in ()).throw(
@@ -175,6 +176,33 @@ def test_cli_run_fails_without_playwright(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "Playwright não instalado" in captured.err
+
+
+def test_cli_quick_run_works_with_single_command(sample_workbook: Path, tmp_path: Path, monkeypatch, stub_pdf_renderer) -> None:
+    output_dir = tmp_path / "quick-output"
+    config_abs = (Path(__file__).resolve().parents[1] / "configs" / "dashboard_template.yaml").resolve()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+
+    exit_code = main(
+        [
+            "quick-run",
+            "--input",
+            str(sample_workbook),
+            "--config",
+            str(config_abs),
+            "--out",
+            str(output_dir),
+            "--run-date",
+            "2026-03-07",
+        ]
+    )
+
+    assert exit_code == 0
+    assert (output_dir / "report.html").exists()
+    assert (output_dir / "report.pdf").exists()
+    assert (output_dir / "quick-run.db").exists()
 
 
 def test_cli_migrate_schema_recreates_legacy_table(config_path: Path, tmp_path: Path, monkeypatch) -> None:

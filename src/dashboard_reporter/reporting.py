@@ -2,8 +2,10 @@
 
 import json
 import importlib.resources as resources
+import os
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 import matplotlib
 
@@ -242,7 +244,7 @@ def _get_sync_playwright() -> Callable[..., Any]:
     return sync_playwright
 
 
-def _write_pdf_from_html(html_path: Path, output_path: Path) -> None:
+def _write_pdf_with_playwright(html_path: Path, output_path: Path) -> None:
     sync_playwright = _get_sync_playwright()
 
     try:
@@ -264,6 +266,76 @@ def _write_pdf_from_html(html_path: Path, output_path: Path) -> None:
         raise
     except Exception as exc:
         raise RuntimeError(f"Falha ao gerar PDF via Playwright: {exc}") from exc
+
+
+def _write_pdf_with_xhtml2pdf(html_path: Path, output_path: Path) -> None:
+    try:
+        from xhtml2pdf import pisa
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("xhtml2pdf não instalado. Instale com: pip install xhtml2pdf") from exc
+
+    html_content = html_path.read_text(encoding="utf-8")
+    # xhtml2pdf does not support CSS variables. Resolve known theme vars first.
+    html_content = (
+        html_content.replace("var(--bg)", "#f4f6f8")
+        .replace("var(--paper)", "#ffffff")
+        .replace("var(--ink)", "#102a43")
+        .replace("var(--muted)", "#486581")
+        .replace("var(--accent)", "#114b5f")
+        .replace("var(--line)", "#d9e2ec")
+    )
+    base_dir = html_path.parent.resolve()
+
+    def _link_callback(uri: str, _: str | None = None) -> str:
+        parsed = urlparse(uri)
+        if parsed.scheme in {"http", "https", "data"}:
+            return uri
+
+        if parsed.scheme == "file":
+            return parsed.path
+
+        normalized = uri.replace("\\", "/").lstrip("/")
+        return str((base_dir / normalized).resolve())
+
+    with output_path.open("wb") as pdf_file:
+        result = pisa.CreatePDF(
+            src=html_content,
+            dest=pdf_file,
+            encoding="utf-8",
+            link_callback=_link_callback,
+        )
+
+    if result.err:
+        raise RuntimeError("Falha ao gerar PDF via xhtml2pdf")
+
+
+def _write_pdf_from_html(html_path: Path, output_path: Path) -> None:
+    engine = os.getenv("DASHBOARD_REPORTER_PDF_ENGINE", "auto").strip().lower()
+
+    if engine == "playwright":
+        _write_pdf_with_playwright(html_path, output_path)
+        return
+
+    if engine in {"xhtml2pdf", "pisa"}:
+        _write_pdf_with_xhtml2pdf(html_path, output_path)
+        return
+
+    if engine != "auto":
+        raise RuntimeError("DASHBOARD_REPORTER_PDF_ENGINE inválido. Use: auto, xhtml2pdf ou playwright")
+
+    last_error: Exception | None = None
+    for backend in (_write_pdf_with_xhtml2pdf, _write_pdf_with_playwright):
+        try:
+            backend(html_path, output_path)
+            return
+        except Exception as exc:  # pragma: no cover - fallback path
+            last_error = exc
+
+    raise RuntimeError(
+        "Nenhum backend de PDF disponível. Instale xhtml2pdf (recomendado) "
+        "ou Playwright+Chromium. Último erro: "
+        f"{last_error}"
+    )
 
 
 def generate_report(

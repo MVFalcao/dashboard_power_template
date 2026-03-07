@@ -16,10 +16,11 @@ dependencies = [
   "pandas>=2.2",
   "Jinja2>=3.1",
   "matplotlib>=3.8",
+  "playwright>=1.45",
 ]
 
 [project.optional-dependencies]
-turso = ["libsql-client>=0.4.0"]
+turso = ["libsql-client>=0.3.1"]
 dev = [
   "pytest>=8.0",
   "pytest-cov>=5.0",
@@ -36,7 +37,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-"dashboard_reporter" = ["templates/*.j2", "configs/*.yaml"]
+"dashboard_reporter" = ["templates/*.j2", "configs/*.yaml", "assets/*.geojson"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"

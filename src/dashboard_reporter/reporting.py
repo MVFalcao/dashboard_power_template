@@ -1,20 +1,51 @@
 ﻿from __future__ import annotations
 
-from html import unescape
-import math
-import re
+import json
+import importlib.resources as resources
 from pathlib import Path
-from textwrap import wrap
-from typing import Any
+from typing import Any, Callable
 
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.collections import PatchCollection
+from matplotlib.colors import Normalize
+from matplotlib.patches import Polygon
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 from .models import NormalizationResult, ReportArtifacts, RunContext
 from .utils import ensure_dir
+
+_BRAZIL_STATE_CODES = {
+    "AC",
+    "AL",
+    "AP",
+    "AM",
+    "BA",
+    "CE",
+    "DF",
+    "ES",
+    "GO",
+    "MA",
+    "MT",
+    "MS",
+    "MG",
+    "PA",
+    "PB",
+    "PR",
+    "PE",
+    "PI",
+    "RJ",
+    "RN",
+    "RS",
+    "RO",
+    "RR",
+    "SC",
+    "SP",
+    "SE",
+    "TO",
+}
 
 
 def _plot_bar_chart(labels: list[str], values: list[int], title: str, output_path: Path) -> None:
@@ -42,104 +73,197 @@ def _plot_bar_chart(labels: list[str], values: list[int], title: str, output_pat
     plt.close(fig)
 
 
-def _html_to_plain_text(html: str) -> str:
-    text = re.sub(r"<(script|style)[^>]*>.*?</\\1>", "", html, flags=re.IGNORECASE | re.DOTALL)
-    text = re.sub(r"<br\\s*/?>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"</(p|h1|h2|h3|h4|li|tr|section|div|table|thead|tbody)>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = unescape(text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+def _extract_uf_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        raw_value = str(row.get("valor", "")).strip().upper()
+        amount = int(row.get("quantidade", 0))
 
-
-def _pdf_escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-
-
-def _build_pdf_stream(lines: list[str]) -> str:
-    if not lines:
-        lines = [""]
-
-    commands = ["BT", "/F1 10 Tf", "14 TL", "50 790 Td"]
-    first = True
-    for line in lines:
-        safe = _pdf_escape(line)
-        if first:
-            commands.append(f"({safe}) Tj")
-            first = False
-        else:
-            commands.append("T*")
-            commands.append(f"({safe}) Tj")
-    commands.append("ET")
-    return "\n".join(commands)
-
-
-def _write_simple_pdf_from_html(html: str, output_path: Path) -> None:
-    text = _html_to_plain_text(html)
-    wrapped_lines: list[str] = []
-
-    for paragraph in text.splitlines():
-        chunk = paragraph.strip()
-        if not chunk:
-            wrapped_lines.append("")
+        if raw_value in _BRAZIL_STATE_CODES:
+            counts[raw_value] = amount
             continue
-        wrapped_lines.extend(wrap(chunk, width=95) or [""])
 
-    lines_per_page = 48
-    pages = [wrapped_lines[idx : idx + lines_per_page] for idx in range(0, len(wrapped_lines), lines_per_page)] or [[""]]
+        token = raw_value[:2]
+        if token in _BRAZIL_STATE_CODES:
+            counts[token] = amount
 
-    objects: list[str] = ["", ""]
+    return counts
 
-    def add_obj(payload: str) -> int:
-        objects.append(payload)
-        return len(objects)
 
-    font_obj = add_obj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
-    page_refs: list[int] = []
+def _state_geojson_path() -> Path:
+    return Path(resources.files("dashboard_reporter") / "assets" / "brazil_states.geojson")
 
-    for page_lines in pages:
-        stream = _build_pdf_stream(page_lines)
-        stream_payload = f"<< /Length {len(stream.encode('latin-1', errors='replace'))} >>\nstream\n{stream}\nendstream"
-        content_obj = add_obj(stream_payload)
-        page_obj = add_obj(
-            "<< /Type /Page /Parent 2 0 R "
-            f"/MediaBox [0 0 595 842] /Resources << /Font << /F1 {font_obj} 0 R >> >> "
-            f"/Contents {content_obj} 0 R >>"
+
+def _iter_outer_rings(geometry: dict[str, Any]) -> list[list[tuple[float, float]]]:
+    gtype = geometry.get("type")
+    coordinates = geometry.get("coordinates", [])
+    rings: list[list[tuple[float, float]]] = []
+
+    if gtype == "Polygon":
+        if coordinates:
+            rings.append([(float(lon), float(lat)) for lon, lat in coordinates[0]])
+    elif gtype == "MultiPolygon":
+        for polygon in coordinates:
+            if polygon:
+                rings.append([(float(lon), float(lat)) for lon, lat in polygon[0]])
+
+    return rings
+
+
+def _polygon_area_centroid(points: list[tuple[float, float]]) -> tuple[float, tuple[float, float]]:
+    if len(points) < 3:
+        if not points:
+            return 0.0, (0.0, 0.0)
+        x_mean = sum(point[0] for point in points) / len(points)
+        y_mean = sum(point[1] for point in points) / len(points)
+        return 0.0, (x_mean, y_mean)
+
+    area_term = 0.0
+    cx_term = 0.0
+    cy_term = 0.0
+
+    for idx in range(len(points)):
+        x0, y0 = points[idx]
+        x1, y1 = points[(idx + 1) % len(points)]
+        cross = (x0 * y1) - (x1 * y0)
+        area_term += cross
+        cx_term += (x0 + x1) * cross
+        cy_term += (y0 + y1) * cross
+
+    area = area_term / 2.0
+    if abs(area) < 1e-9:
+        x_mean = sum(point[0] for point in points) / len(points)
+        y_mean = sum(point[1] for point in points) / len(points)
+        return 0.0, (x_mean, y_mean)
+
+    centroid_x = cx_term / (6.0 * area)
+    centroid_y = cy_term / (6.0 * area)
+    return abs(area), (centroid_x, centroid_y)
+
+
+def _plot_brazil_state_map(uf_counts: dict[str, int], output_path: Path) -> None:
+    geojson_path = _state_geojson_path()
+    geojson_data = json.loads(geojson_path.read_text(encoding="utf-8"))
+
+    patches: list[Polygon] = []
+    patch_values: list[int] = []
+    labels: list[tuple[str, int, float, float]] = []
+
+    min_lon = 999.0
+    max_lon = -999.0
+    min_lat = 999.0
+    max_lat = -999.0
+
+    for feature in geojson_data.get("features", []):
+        properties = feature.get("properties", {})
+        uf = str(properties.get("sigla", "")).strip().upper()
+        if uf not in _BRAZIL_STATE_CODES:
+            continue
+
+        rings = _iter_outer_rings(feature.get("geometry", {}))
+        if not rings:
+            continue
+
+        count = int(uf_counts.get(uf, 0))
+        best_area = -1.0
+        best_centroid = (0.0, 0.0)
+
+        for ring in rings:
+            if len(ring) < 3:
+                continue
+
+            patches.append(Polygon(ring, closed=True))
+            patch_values.append(count)
+
+            for lon, lat in ring:
+                min_lon = min(min_lon, lon)
+                max_lon = max(max_lon, lon)
+                min_lat = min(min_lat, lat)
+                max_lat = max(max_lat, lat)
+
+            area, centroid = _polygon_area_centroid(ring)
+            if area > best_area:
+                best_area = area
+                best_centroid = centroid
+
+        labels.append((uf, count, best_centroid[0], best_centroid[1]))
+
+    if not patches:
+        return
+
+    vmax = max(patch_values) if patch_values else 1
+    if vmax <= 0:
+        vmax = 1
+
+    fig, ax = plt.subplots(figsize=(9, 9))
+
+    norm = Normalize(vmin=0, vmax=vmax)
+    cmap = matplotlib.colormaps["YlOrRd"]
+    collection = PatchCollection(patches, cmap=cmap, norm=norm, edgecolor="#1f2937", linewidths=0.45)
+    collection.set_array(patch_values)
+    ax.add_collection(collection)
+
+    lon_margin = (max_lon - min_lon) * 0.03
+    lat_margin = (max_lat - min_lat) * 0.03
+
+    ax.set_xlim(min_lon - lon_margin, max_lon + lon_margin)
+    ax.set_ylim(min_lat - lat_margin, max_lat + lat_margin)
+    ax.set_aspect("equal", adjustable="box")
+    ax.axis("off")
+    ax.set_title("Mapa do Brasil por estado (quantidade de pessoas)", fontsize=13, pad=12)
+
+    for uf, count, lon, lat in labels:
+        ax.text(
+            lon,
+            lat,
+            f"{uf}\n{count}",
+            ha="center",
+            va="center",
+            fontsize=6,
+            color="#0f172a",
+            bbox={"boxstyle": "round,pad=0.15", "fc": "white", "ec": "none", "alpha": 0.75},
         )
-        page_refs.append(page_obj)
 
-    kids = " ".join(f"{obj} 0 R" for obj in page_refs)
-    objects[1] = f"<< /Type /Pages /Count {len(page_refs)} /Kids [{kids}] >>"
-    objects[0] = "<< /Type /Catalog /Pages 2 0 R >>"
+    colorbar = fig.colorbar(collection, ax=ax, fraction=0.032, pad=0.02)
+    colorbar.set_label("Quantidade")
 
-    output = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"
-    offsets = [0]
-
-    for obj_index, payload in enumerate(objects, start=1):
-        offsets.append(len(output))
-        output += f"{obj_index} 0 obj\n".encode("latin-1")
-        output += payload.encode("latin-1", errors="replace")
-        output += b"\nendobj\n"
-
-    xref_position = len(output)
-    output += f"xref\n0 {len(objects) + 1}\n".encode("latin-1")
-    output += b"0000000000 65535 f \n"
-    for offset in offsets[1:]:
-        output += f"{offset:010d} 00000 n \n".encode("latin-1")
-    output += (
-        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_position}\n%%EOF"
-    ).encode("latin-1")
-
-    output_path.write_bytes(output)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
 
 
-def _write_pdf_from_html(html: str, output_path: Path, base_url: Path) -> None:
+def _get_sync_playwright() -> Callable[..., Any]:
     try:
-        from weasyprint import HTML
+        from playwright.sync_api import sync_playwright
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Playwright não instalado. Instale com: pip install playwright && playwright install chromium"
+        ) from exc
+    return sync_playwright
 
-        HTML(string=html, base_url=str(base_url)).write_pdf(str(output_path))
-    except Exception:
-        _write_simple_pdf_from_html(html, output_path)
+
+def _write_pdf_from_html(html_path: Path, output_path: Path) -> None:
+    sync_playwright = _get_sync_playwright()
+
+    try:
+        with sync_playwright() as playwright:
+            try:
+                browser = playwright.chromium.launch()
+            except Exception as exc:
+                raise RuntimeError(
+                    "Chromium do Playwright não encontrado. Execute: playwright install chromium"
+                ) from exc
+
+            try:
+                page = browser.new_page()
+                page.goto(html_path.resolve().as_uri(), wait_until="networkidle")
+                page.pdf(path=str(output_path), print_background=True, format="A4")
+            finally:
+                browser.close()
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"Falha ao gerar PDF via Playwright: {exc}") from exc
 
 
 def generate_report(
@@ -158,7 +282,8 @@ def generate_report(
     _plot_bar_chart(funnel_labels, funnel_values, "Funil de Candidatos", funnel_chart)
     chart_paths["funil"] = funnel_chart
 
-    for dimension, rows in metrics.get("demografia", {}).items():
+    demografia = metrics.get("demografia", {})
+    for dimension, rows in demografia.items():
         if not rows:
             continue
 
@@ -170,6 +295,15 @@ def generate_report(
         chart_path = charts_dir / chart_name
         _plot_bar_chart(labels, values, f"Distribuição por {dimension}", chart_path)
         chart_paths[f"demografia_{dimension}"] = chart_path
+
+    regiao_rows = demografia.get("regiao", [])
+    if regiao_rows:
+        uf_counts = _extract_uf_counts(regiao_rows)
+        if uf_counts:
+            map_path = charts_dir / "mapa_brasil_regioes.png"
+            _plot_brazil_state_map(uf_counts, map_path)
+            if map_path.exists():
+                chart_paths["mapa_brasil_regioes"] = map_path
 
     env = Environment(
         loader=PackageLoader("dashboard_reporter", "templates"),
@@ -184,7 +318,7 @@ def generate_report(
         source_file=str(context.input_path),
         resumo=metrics.get("resumo", {}),
         funil=metrics.get("funil", {}),
-        demografia=metrics.get("demografia", {}),
+        demografia=demografia,
         qualidade=metrics.get("qualidade_dados", {}),
         charts={key: str(path.relative_to(context.output_dir)).replace("\\", "/") for key, path in chart_paths.items()},
         candidates=[candidate.to_dict() for candidate in normalization.candidates[:30]],
@@ -194,6 +328,6 @@ def generate_report(
     pdf_path = context.output_dir / "report.pdf"
 
     html_path.write_text(report_html, encoding="utf-8")
-    _write_pdf_from_html(report_html, pdf_path, context.output_dir)
+    _write_pdf_from_html(html_path, pdf_path)
 
     return ReportArtifacts(html_path=html_path, pdf_path=pdf_path, chart_paths=chart_paths)

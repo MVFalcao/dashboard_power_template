@@ -61,7 +61,7 @@ def run_pipeline(
 
     report = generate_report(metrics=metrics, normalization=normalization, context=context)
 
-    storage = DatabaseStorage.from_env()
+    storage = DatabaseStorage.from_env(output_headers=config.storage.output_headers)
     try:
         storage.persist_run(
             run_id=context.run_id,

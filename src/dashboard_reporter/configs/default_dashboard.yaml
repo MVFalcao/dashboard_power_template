@@ -60,6 +60,22 @@ columns:
     - Comentarios
     - Comentários
 
+storage:
+  output_headers:
+    data_inscricao: Data de inscrição
+    nome: Nome do inscrito(a)
+    idade: Idade
+    email: e-mail
+    contato: Contato
+    regiao: Região
+    turma: Turma
+    renda_familiar: Renda Familiar
+    equipe_nau: Equipe NAU
+    agendamento: Agendamento
+    status: Status
+    motivo: Motivo
+    comentarios: Comentarios
+
 status_rules:
   aprovado: APROVADO
   negado: NEGADO

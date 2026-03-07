@@ -52,6 +52,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "motivo": ["Motivo"],
         "comentarios": ["Comentarios", "Comentários"],
     },
+    "storage": {
+        "output_headers": {
+            "data_inscricao": "Data de inscrição",
+            "nome": "Nome do inscrito(a)",
+            "idade": "Idade",
+            "email": "e-mail",
+            "contato": "Contato",
+            "regiao": "Região",
+            "turma": "Turma",
+            "renda_familiar": "Renda Familiar",
+            "equipe_nau": "Equipe NAU",
+            "agendamento": "Agendamento",
+            "status": "Status",
+            "motivo": "Motivo",
+            "comentarios": "Comentarios",
+        }
+    },
     "status_rules": {
         "aprovado": "APROVADO",
         "negado": "NEGADO",
@@ -80,9 +97,15 @@ class SourceConfig:
 
 
 @dataclass(slots=True)
+class StorageConfig:
+    output_headers: dict[str, str]
+
+
+@dataclass(slots=True)
 class AppConfig:
     source: SourceConfig
     columns: dict[str, list[str]]
+    storage: StorageConfig
     status_rules: dict[str, str]
     cleaning_rules: dict[str, Any]
     required_fields: list[str]
@@ -98,6 +121,7 @@ class AppConfig:
                 "status_by_sheet": self.source.status_by_sheet,
             },
             "columns": self.columns,
+            "storage": {"output_headers": self.storage.output_headers},
             "status_rules": self.status_rules,
             "cleaning_rules": self.cleaning_rules,
             "required_fields": self.required_fields,
@@ -124,6 +148,13 @@ def load_config(path: Path) -> AppConfig:
 
     merged = _deep_merge(DEFAULT_CONFIG, loaded)
     return _validate_config(merged)
+
+
+def _build_default_output_headers(columns: dict[str, list[str]]) -> dict[str, str]:
+    defaults: dict[str, str] = {}
+    for canonical, aliases in columns.items():
+        defaults[canonical] = aliases[0]
+    return defaults
 
 
 def _validate_config(data: dict[str, Any]) -> AppConfig:
@@ -159,6 +190,34 @@ def _validate_config(data: dict[str, Any]) -> AppConfig:
         if field not in normalized_columns:
             raise ValueError(f"required_fields contém campo ausente em columns: {field}")
 
+    storage_raw = data.get("storage", {})
+    if not isinstance(storage_raw, dict):
+        raise ValueError("storage deve ser um objeto")
+
+    output_headers_raw = storage_raw.get("output_headers")
+    if output_headers_raw is None:
+        output_headers_raw = _build_default_output_headers(normalized_columns)
+
+    if not isinstance(output_headers_raw, dict) or not output_headers_raw:
+        raise ValueError("storage.output_headers deve ser um mapeamento não vazio")
+
+    output_headers: dict[str, str] = {}
+    used_headers: set[str] = set()
+    for canonical, header in output_headers_raw.items():
+        canonical_key = str(canonical).strip()
+        if canonical_key not in CANONICAL_FIELDS:
+            raise ValueError(f"storage.output_headers contém campo canônico inválido: {canonical_key}")
+
+        header_name = str(header).strip()
+        if not header_name:
+            raise ValueError(f"storage.output_headers[{canonical_key}] não pode ser vazio")
+
+        lowered = header_name.lower()
+        if lowered in used_headers:
+            raise ValueError(f"storage.output_headers contém headers duplicados: {header_name}")
+        used_headers.add(lowered)
+        output_headers[canonical_key] = header_name
+
     status_rules_input = data.get("status_rules", {})
     if not isinstance(status_rules_input, dict):
         raise ValueError("status_rules deve ser um mapeamento")
@@ -183,6 +242,7 @@ def _validate_config(data: dict[str, Any]) -> AppConfig:
     return AppConfig(
         source=source,
         columns=normalized_columns,
+        storage=StorageConfig(output_headers=output_headers),
         status_rules=status_rules,
         cleaning_rules=dict(data.get("cleaning_rules", {})),
         required_fields=required_fields,

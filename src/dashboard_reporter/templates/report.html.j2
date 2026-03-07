@@ -193,6 +193,11 @@
         <img src="{{ charts[chart_key] }}" alt="Demografia {{ dimension }}" />
       </div>
       {% endif %}
+      {% if dimension == "regiao" and charts["mapa_brasil_regioes"] %}
+      <div class="chart">
+        <img src="{{ charts["mapa_brasil_regioes"] }}" alt="Mapa do Brasil por estado" />
+      </div>
+      {% endif %}
       {% endfor %}
     </section>
 

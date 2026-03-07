@@ -6,7 +6,9 @@ import sys
 from pathlib import Path
 
 from .config import load_config
+from .env_loader import load_env_from_dotenv
 from .pipeline import dry_run_pipeline, run_pipeline
+from .storage import DatabaseStorage
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -31,6 +33,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
     validate_parser = subparsers.add_parser("validate-config", help="Valida e imprime a configuração resolvida")
     validate_parser.add_argument("--config", required=True, type=Path, help="Caminho da config YAML")
+
+    migrate_parser = subparsers.add_parser(
+        "migrate-schema",
+        help="Migra schema do banco para o layout atual (destrutivo para normalized_candidates)",
+    )
+    migrate_parser.add_argument("--config", required=True, type=Path, help="Caminho da config YAML")
+    migrate_parser.add_argument(
+        "--drop-normalized-candidates",
+        action="store_true",
+        help="Confirma recriação destrutiva da tabela normalized_candidates",
+    )
 
     return parser
 
@@ -94,7 +107,31 @@ def _command_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _command_migrate_schema(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+
+    storage = DatabaseStorage.from_env(output_headers=config.storage.output_headers)
+    try:
+        result = storage.migrate_schema(drop_normalized_candidates=args.drop_normalized_candidates)
+    finally:
+        storage.close()
+
+    print(
+        json.dumps(
+            {
+                "status": "ok",
+                "mode": "migrate-schema",
+                "result": result,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    load_env_from_dotenv()
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -105,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
             return _command_dry_run(args)
         if args.command == "run":
             return _command_run(args)
+        if args.command == "migrate-schema":
+            return _command_migrate_schema(args)
     except Exception as exc:  # pragma: no cover - bounded by CLI integration tests
         print(f"ERRO: {exc}", file=sys.stderr)
         return 1

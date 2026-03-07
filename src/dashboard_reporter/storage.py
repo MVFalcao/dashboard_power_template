@@ -5,16 +5,53 @@ import importlib
 import json
 import os
 import sqlite3
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Protocol
 
 from .models import NormalizedCandidate, RawRow
 
+LEGACY_NORMALIZED_COLUMNS = {
+    "candidate_id",
+    "source_key",
+    "nome",
+    "data_inscricao",
+    "idade",
+    "faixa_etaria",
+    "email",
+    "contato",
+    "regiao",
+    "turma",
+    "renda_familiar",
+    "equipe_nau",
+    "agendamento",
+    "status",
+    "motivo",
+    "comentarios",
+    "source_sheets_json",
+    "valid",
+    "missing_fields_json",
+    "updated_at",
+    "last_run_id",
+}
+
+SYSTEM_COLUMNS = [
+    "candidate_id",
+    "source_key",
+    "source_sheets_json",
+    "valid",
+    "missing_fields_json",
+    "updated_at",
+    "last_run_id",
+]
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _quote_identifier(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
 
 
 class SqlExecutor(Protocol):
@@ -54,38 +91,26 @@ class LibsqlExecutor:
         if not auth_token:
             raise ValueError("TURSO_AUTH_TOKEN é obrigatório para conexão remota")
 
-        module = importlib.import_module("libsql_client")
+        self._module = importlib.import_module("libsql_client")
+        self._auth_token = auth_token
+        self._url = url
         self._is_async = False
+        self._fallback_used = False
+        self.client = self._create_client(url)
 
-        create_sync = getattr(module, "create_client_sync", None)
+    def _create_client(self, url: str) -> Any:
+        self._is_async = False
+        create_sync = getattr(self._module, "create_client_sync", None)
         if callable(create_sync):
-            self.client = create_sync(url=url, auth_token=auth_token)
-            return
+            return create_sync(url=url, auth_token=self._auth_token)
 
-        create_async = getattr(module, "create_client", None)
+        create_async = getattr(self._module, "create_client", None)
         if not callable(create_async):
             raise RuntimeError("Não foi possível criar cliente libsql")
-
-        self.client = asyncio.run(create_async(url=url, auth_token=auth_token))
         self._is_async = True
+        return asyncio.run(create_async(url=url, auth_token=self._auth_token))
 
-    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
-        if self._is_async:
-            return asyncio.run(self.client.execute(sql, params))
-        return self.client.execute(sql, params)
-
-    def executemany(self, sql: str, rows: Iterable[tuple[Any, ...]]) -> Any:
-        if self._is_async:
-            async def _run() -> None:
-                for row in rows:
-                    await self.client.execute(sql, row)
-            return asyncio.run(_run())
-
-        for row in rows:
-            self.client.execute(sql, row)
-        return None
-
-    def close(self) -> None:
+    def _close_client(self) -> None:
         close_method = getattr(self.client, "close", None)
         if close_method is None:
             return
@@ -95,29 +120,92 @@ class LibsqlExecutor:
         else:
             close_method()
 
+    def _should_retry_with_https(self, exc: Exception) -> bool:
+        if self._fallback_used:
+            return False
+        if not self._url.startswith("libsql://"):
+            return False
+
+        message = str(exc).lower()
+        retry_markers = ("invalid response status", "wss", "handshake")
+        return any(marker in message for marker in retry_markers)
+
+    def _switch_to_https(self) -> None:
+        https_url = "https://" + self._url[len("libsql://") :]
+        self._close_client()
+        self.client = self._create_client(https_url)
+        self._url = https_url
+        self._fallback_used = True
+
+    def _execute_once(self, sql: str, params: tuple[Any, ...]) -> Any:
+        if self._is_async:
+            return asyncio.run(self.client.execute(sql, params))
+        return self.client.execute(sql, params)
+
+    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
+        try:
+            return self._execute_once(sql, params)
+        except Exception as exc:
+            if not self._should_retry_with_https(exc):
+                raise
+            self._switch_to_https()
+            return self._execute_once(sql, params)
+
+    def _executemany_once(self, sql: str, rows: list[tuple[Any, ...]]) -> Any:
+        if self._is_async:
+
+            async def _run() -> None:
+                for row in rows:
+                    await self.client.execute(sql, row)
+
+            return asyncio.run(_run())
+
+        for row in rows:
+            self.client.execute(sql, row)
+        return None
+
+    def executemany(self, sql: str, rows: Iterable[tuple[Any, ...]]) -> Any:
+        buffered_rows = list(rows)
+        try:
+            return self._executemany_once(sql, buffered_rows)
+        except Exception as exc:
+            if not self._should_retry_with_https(exc):
+                raise
+            self._switch_to_https()
+            return self._executemany_once(sql, buffered_rows)
+
+    def close(self) -> None:
+        self._close_client()
+
 
 class DatabaseStorage:
-    def __init__(self, executor: SqlExecutor):
+    def __init__(self, executor: SqlExecutor, output_headers: dict[str, str]):
+        if not output_headers:
+            raise ValueError("output_headers não pode ser vazio")
+
         self.executor = executor
+        self.output_headers = dict(output_headers)
+        self._canonical_order = list(self.output_headers.keys())
+        self._header_order = list(self.output_headers.values())
 
     @classmethod
-    def from_env(cls) -> "DatabaseStorage":
+    def from_env(cls, *, output_headers: dict[str, str]) -> "DatabaseStorage":
         url = os.getenv("TURSO_DATABASE_URL")
         if not url:
             raise RuntimeError("TURSO_DATABASE_URL não definido")
 
         if url.startswith("file:"):
             db_path = Path(url.replace("file:", "", 1))
-            return cls(SQLiteExecutor(db_path))
+            return cls(SQLiteExecutor(db_path), output_headers)
 
         if "://" not in url:
             db_path = Path(url)
-            return cls(SQLiteExecutor(db_path))
+            return cls(SQLiteExecutor(db_path), output_headers)
 
         try:
             token = os.getenv("TURSO_AUTH_TOKEN", "")
             executor = LibsqlExecutor(url=url, auth_token=token)
-            return cls(executor)
+            return cls(executor, output_headers)
         except ModuleNotFoundError as exc:
             raise RuntimeError(
                 "libsql_client não instalado. Instale com: pip install 'dashboard-reporter[turso]'"
@@ -126,7 +214,41 @@ class DatabaseStorage:
     def close(self) -> None:
         self.executor.close()
 
-    def ensure_schema(self) -> None:
+    def _query_rows(self, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
+        result = self.executor.execute(sql, params)
+
+        if hasattr(result, "fetchall"):
+            return [tuple(row) for row in result.fetchall()]
+
+        rows = getattr(result, "rows", None)
+        if rows is None:
+            return []
+
+        parsed_rows: list[tuple[Any, ...]] = []
+        for row in rows:
+            if isinstance(row, tuple):
+                parsed_rows.append(row)
+            elif isinstance(row, list):
+                parsed_rows.append(tuple(row))
+            else:
+                try:
+                    parsed_rows.append(tuple(row))
+                except TypeError:
+                    parsed_rows.append((row,))
+        return parsed_rows
+
+    def _table_exists(self, table_name: str) -> bool:
+        rows = self._query_rows(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,),
+        )
+        return bool(rows)
+
+    def _table_columns(self, table_name: str) -> list[str]:
+        rows = self._query_rows(f"PRAGMA table_info({_quote_identifier(table_name)})")
+        return [str(row[1]) for row in rows]
+
+    def _ensure_raw_rows_table(self) -> None:
         self.executor.execute(
             """
             CREATE TABLE IF NOT EXISTS raw_rows (
@@ -143,34 +265,7 @@ class DatabaseStorage:
             """
         )
 
-        self.executor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS normalized_candidates (
-                candidate_id TEXT PRIMARY KEY,
-                source_key TEXT NOT NULL,
-                nome TEXT,
-                data_inscricao TEXT,
-                idade TEXT,
-                faixa_etaria TEXT,
-                email TEXT,
-                contato TEXT,
-                regiao TEXT,
-                turma TEXT,
-                renda_familiar TEXT,
-                equipe_nau TEXT,
-                agendamento TEXT,
-                status TEXT NOT NULL,
-                motivo TEXT,
-                comentarios TEXT,
-                source_sheets_json TEXT NOT NULL,
-                valid INTEGER NOT NULL,
-                missing_fields_json TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                last_run_id TEXT NOT NULL
-            )
-            """
-        )
-
+    def _ensure_metrics_snapshots_table(self) -> None:
         self.executor.execute(
             """
             CREATE TABLE IF NOT EXISTS metrics_snapshots (
@@ -184,6 +279,70 @@ class DatabaseStorage:
             )
             """
         )
+
+    def _normalized_expected_columns(self) -> list[str]:
+        return [*SYSTEM_COLUMNS, *self._header_order]
+
+    def _create_normalized_candidates_table(self) -> None:
+        dynamic_columns = ",\n                ".join(
+            f"{_quote_identifier(header)} TEXT" for header in self._header_order
+        )
+
+        create_sql = f"""
+            CREATE TABLE IF NOT EXISTS normalized_candidates (
+                {_quote_identifier('candidate_id')} TEXT PRIMARY KEY,
+                {_quote_identifier('source_key')} TEXT NOT NULL,
+                {_quote_identifier('source_sheets_json')} TEXT NOT NULL,
+                {_quote_identifier('valid')} INTEGER NOT NULL,
+                {_quote_identifier('missing_fields_json')} TEXT NOT NULL,
+                {_quote_identifier('updated_at')} TEXT NOT NULL,
+                {_quote_identifier('last_run_id')} TEXT NOT NULL,
+                {dynamic_columns}
+            )
+        """
+        self.executor.execute(create_sql)
+
+    def _ensure_normalized_candidates_table(self) -> None:
+        if not self._table_exists("normalized_candidates"):
+            self._create_normalized_candidates_table()
+            return
+
+        existing_columns = self._table_columns("normalized_candidates")
+        expected_columns = self._normalized_expected_columns()
+
+        if set(existing_columns) == set(expected_columns):
+            return
+
+        legacy_detected = bool(LEGACY_NORMALIZED_COLUMNS.intersection(existing_columns))
+        legacy_hint = " (schema legado detectado)" if legacy_detected else ""
+
+        raise RuntimeError(
+            "Schema de 'normalized_candidates' incompatível"
+            f"{legacy_hint}. Execute: dashboard-reporter migrate-schema --config <arquivo> --drop-normalized-candidates"
+        )
+
+    def ensure_schema(self) -> None:
+        self._ensure_raw_rows_table()
+        self._ensure_metrics_snapshots_table()
+        self._ensure_normalized_candidates_table()
+
+    def migrate_schema(self, *, drop_normalized_candidates: bool) -> dict[str, Any]:
+        if not drop_normalized_candidates:
+            raise RuntimeError("Migração destrutiva requer --drop-normalized-candidates")
+
+        self._ensure_raw_rows_table()
+        self._ensure_metrics_snapshots_table()
+
+        existed = self._table_exists("normalized_candidates")
+        if existed:
+            self.executor.execute("DROP TABLE normalized_candidates")
+
+        self._create_normalized_candidates_table()
+        return {
+            "normalized_candidates_recreated": True,
+            "normalized_candidates_previously_existed": existed,
+            "normalized_candidates_columns": self._normalized_expected_columns(),
+        }
 
     def upsert_raw_rows(
         self,
@@ -230,65 +389,41 @@ class DatabaseStorage:
 
     def upsert_candidates(self, *, run_id: str, candidates: list[NormalizedCandidate]) -> None:
         now = _utc_now()
-        payload = [
-            (
+
+        all_columns = [*SYSTEM_COLUMNS, *self._header_order]
+        quoted_columns = ", ".join(_quote_identifier(column) for column in all_columns)
+        placeholders = ", ".join("?" for _ in all_columns)
+
+        update_columns = [column for column in all_columns if column != "candidate_id"]
+        update_clause = ", ".join(
+            f"{_quote_identifier(column)} = excluded.{_quote_identifier(column)}"
+            for column in update_columns
+        )
+
+        payload: list[tuple[Any, ...]] = []
+        for candidate in candidates:
+            row_values: list[Any] = [
                 candidate.candidate_id,
                 candidate.source_key,
-                candidate.nome,
-                candidate.data_inscricao,
-                candidate.idade,
-                candidate.faixa_etaria,
-                candidate.email,
-                candidate.contato,
-                candidate.regiao,
-                candidate.turma,
-                candidate.renda_familiar,
-                candidate.equipe_nau,
-                candidate.agendamento,
-                candidate.status,
-                candidate.motivo,
-                candidate.comentarios,
                 json.dumps(candidate.source_sheets, ensure_ascii=False),
                 int(candidate.valid),
                 json.dumps(candidate.missing_fields, ensure_ascii=False),
                 now,
                 run_id,
-            )
-            for candidate in candidates
-        ]
+            ]
 
-        self.executor.executemany(
-            """
-            INSERT INTO normalized_candidates (
-                candidate_id, source_key, nome, data_inscricao, idade, faixa_etaria,
-                email, contato, regiao, turma, renda_familiar, equipe_nau, agendamento,
-                status, motivo, comentarios, source_sheets_json, valid, missing_fields_json,
-                updated_at, last_run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            for canonical in self._canonical_order:
+                row_values.append(getattr(candidate, canonical, None))
+
+            payload.append(tuple(row_values))
+
+        sql = f"""
+            INSERT INTO normalized_candidates ({quoted_columns})
+            VALUES ({placeholders})
             ON CONFLICT(candidate_id) DO UPDATE SET
-                source_key = excluded.source_key,
-                nome = excluded.nome,
-                data_inscricao = excluded.data_inscricao,
-                idade = excluded.idade,
-                faixa_etaria = excluded.faixa_etaria,
-                email = excluded.email,
-                contato = excluded.contato,
-                regiao = excluded.regiao,
-                turma = excluded.turma,
-                renda_familiar = excluded.renda_familiar,
-                equipe_nau = excluded.equipe_nau,
-                agendamento = excluded.agendamento,
-                status = excluded.status,
-                motivo = excluded.motivo,
-                comentarios = excluded.comentarios,
-                source_sheets_json = excluded.source_sheets_json,
-                valid = excluded.valid,
-                missing_fields_json = excluded.missing_fields_json,
-                updated_at = excluded.updated_at,
-                last_run_id = excluded.last_run_id
-            """,
-            payload,
-        )
+                {update_clause}
+        """
+        self.executor.executemany(sql, payload)
 
     def upsert_metrics(self, *, run_id: str, metrics: dict[str, Any]) -> None:
         now = _utc_now()

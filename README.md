@@ -141,7 +141,13 @@ O que esse comando faz:
 2. Entre na pasta do projeto:
 
 ```powershell
-cd "C:\Users\falca\OneDrive\Documentos\GitHub\dashboard_power_template"
+cd "C:\caminho\para\dashboard_power_template"
+```
+
+No Linux/macOS, use:
+
+```bash
+cd /caminho/para/dashboard_power_template
 ```
 
 3. Rode o comando simplificado:
@@ -177,7 +183,13 @@ dashboard-reporter run --input template/Dashboard_50.xlsx --config configs/dashb
 1. Abra o PowerShell e entre na pasta do projeto:
 
 ```powershell
-cd "C:\Users\falca\OneDrive\Documentos\GitHub\dashboard_power_template"
+cd "C:\caminho\para\dashboard_power_template"
+```
+
+No Linux/macOS, use:
+
+```bash
+cd /caminho/para/dashboard_power_template
 ```
 
 2. Configure variáveis de ambiente:

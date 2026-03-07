@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dashboard-reporter"
+version = "0.1.0"
+description = "Motor generico de relatorios para dashboards XLSX com persistencia Turso"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-only" }
+authors = [{ name = "dashboard_power_template" }]
+dependencies = [
+  "PyYAML>=6.0",
+  "openpyxl>=3.1",
+  "pandas>=2.2",
+  "Jinja2>=3.1",
+  "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+turso = ["libsql-client>=0.4.0"]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "pyinstaller>=6.0",
+]
+
+[project.scripts]
+dashboard-reporter = "dashboard_reporter.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"dashboard_reporter" = ["templates/*.j2", "configs/*.yaml"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-q"
+testpaths = ["tests"]

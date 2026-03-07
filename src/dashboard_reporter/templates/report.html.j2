@@ -1,0 +1,269 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Relatório Dashboard</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --paper: #ffffff;
+      --ink: #102a43;
+      --muted: #486581;
+      --accent: #114b5f;
+      --line: #d9e2ec;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 18px;
+      box-shadow: 0 2px 10px rgba(16, 42, 67, 0.06);
+    }
+
+    h1, h2, h3 {
+      margin-top: 0;
+      color: var(--ink);
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 14px;
+      display: grid;
+      gap: 4px;
+    }
+
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .kpi {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfdff;
+    }
+
+    .kpi .label {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .kpi .value {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px;
+      text-align: left;
+    }
+
+    th {
+      background: #f0f4f8;
+    }
+
+    .chart {
+      margin-top: 12px;
+    }
+
+    .chart img {
+      width: 100%;
+      max-width: 760px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <section class="card">
+      <h1>Relatório Estatístico de Candidaturas</h1>
+      <div class="meta">
+        <div><strong>Run ID:</strong> {{ run_id }}</div>
+        <div><strong>Data de referência:</strong> {{ run_date }}</div>
+        <div><strong>Arquivo origem:</strong> {{ source_file }}</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Visão Executiva</h2>
+      <div class="kpis">
+        <div class="kpi">
+          <div class="label">Total de candidatos</div>
+          <div class="value">{{ resumo.total_candidatos }}</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Total válidos</div>
+          <div class="value">{{ resumo.total_validos }}</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Total inválidos</div>
+          <div class="value">{{ resumo.total_invalidos }}</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Taxa aprovação (%)</div>
+          <div class="value">{{ resumo.taxa_aprovacao }}</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Taxa normalização (%)</div>
+          <div class="value">{{ resumo.taxa_normalizacao_sucesso }}</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Funil de Status</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Quantidade</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for status, quantidade in funil.items() %}
+          <tr>
+            <td>{{ status }}</td>
+            <td>{{ quantidade }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if charts.funil %}
+      <div class="chart">
+        <img src="{{ charts.funil }}" alt="Gráfico de funil" />
+      </div>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>Demografia</h2>
+      {% for dimension, rows in demografia.items() %}
+      <h3>{{ dimension }}</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Valor</th>
+            <th>Quantidade</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>{{ row.valor }}</td>
+            <td>{{ row.quantidade }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% set chart_key = "demografia_" ~ dimension %}
+      {% if charts[chart_key] %}
+      <div class="chart">
+        <img src="{{ charts[chart_key] }}" alt="Demografia {{ dimension }}" />
+      </div>
+      {% endif %}
+      {% if dimension == "regiao" and charts["mapa_brasil_regioes"] %}
+      <div class="chart">
+        <img src="{{ charts["mapa_brasil_regioes"] }}" alt="Mapa do Brasil por estado" />
+      </div>
+      {% endif %}
+      {% endfor %}
+    </section>
+
+    <section class="card">
+      <h2>Qualidade de Dados</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Métrica</th>
+            <th>Valor</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Grupos duplicados mesclados</td>
+            <td>{{ qualidade.grupos_duplicados_mesclados }}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Campos faltantes</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Campo</th>
+            <th>Ocorrências</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for campo, valor in qualidade.campos_faltantes.items() %}
+          <tr>
+            <td>{{ campo }}</td>
+            <td>{{ valor }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Anexo: Amostra de Candidatos Normalizados</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Nome</th>
+            <th>E-mail</th>
+            <th>Data inscrição</th>
+            <th>Status</th>
+            <th>Região</th>
+            <th>Turma</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for candidate in candidates %}
+          <tr>
+            <td>{{ candidate.nome or "" }}</td>
+            <td>{{ candidate.email or "" }}</td>
+            <td>{{ candidate.data_inscricao or "" }}</td>
+            <td>{{ candidate.status }}</td>
+            <td>{{ candidate.regiao or "" }}</td>
+            <td>{{ candidate.turma or "" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </div>
+</body>
+</html>

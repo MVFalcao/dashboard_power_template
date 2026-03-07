@@ -1,0 +1,102 @@
+﻿source:
+  input_sheets:
+    - Database
+    - Candidatos
+    - Aprovados
+    - Em análise
+    - Negado
+  header_row: 1
+  base_sheet_priority:
+    - Database
+    - Candidatos
+    - Aprovados
+    - Em análise
+    - Negado
+  status_sheet_priority:
+    - Candidatos
+    - Aprovados
+    - Em análise
+    - Negado
+    - Database
+  status_by_sheet:
+    Aprovados: APROVADO
+    Negado: NEGADO
+    Em análise: EM_ANALISE
+
+columns:
+  data_inscricao:
+    - Data de inscrição
+    - Data de inscricao
+  nome:
+    - Nome do inscrito(a)
+    - Nome
+  idade:
+    - Idade
+  email:
+    - e-mail
+    - email
+  contato:
+    - Contato
+    - Celular/WhatsApp
+    - Celular
+    - WhatsApp
+  regiao:
+    - Região
+    - Regiao
+  turma:
+    - Turma
+  renda_familiar:
+    - Renda Familiar
+  equipe_nau:
+    - Equipe NAU
+    - Equipe
+  agendamento:
+    - Agendamento
+  status:
+    - Status
+  motivo:
+    - Motivo
+  comentarios:
+    - Comentarios
+    - Comentários
+
+storage:
+  output_headers:
+    data_inscricao: Data de inscrição
+    nome: Nome do inscrito(a)
+    idade: Idade
+    email: e-mail
+    contato: Contato
+    regiao: Região
+    turma: Turma
+    renda_familiar: Renda Familiar
+    equipe_nau: Equipe NAU
+    agendamento: Agendamento
+    status: Status
+    motivo: Motivo
+    comentarios: Comentarios
+
+status_rules:
+  aprovado: APROVADO
+  negado: NEGADO
+  em analise: EM_ANALISE
+  em análise: EM_ANALISE
+
+cleaning_rules:
+  trim_strings: true
+  normalize_accents: true
+  accent_normalize_fields:
+    - status
+  phone_digits_only: true
+  dayfirst_dates: true
+
+required_fields:
+  - nome
+  - data_inscricao
+
+dimensions:
+  - status
+  - regiao
+  - turma
+  - faixa_etaria
+  - renda_familiar
